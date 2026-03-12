@@ -299,6 +299,9 @@ function discoverSubpages(homepage: ParsedPage, baseUrl: string, baseDomain: str
     'personal-injury', 'car-accident', 'truck-accident', 'wrongful-death',
     'medical-malpractice', 'workers-comp', 'slip-and-fall', 'faq',
     'case-result', 'injury', 'accident', 'location', 'office',
+    'liability', 'negligence', 'malpractice', 'criminal', 'defense',
+    'family-law', 'divorce', 'custody', 'estate', 'bankruptcy',
+    'immigration', 'employment', 'discrimination',
   ];
 
   for (const link of homepage.allLinks) {
@@ -333,6 +336,8 @@ function discoverSubpages(homepage: ParsedPage, baseUrl: string, baseDomain: str
     '/results', '/case-results', '/testimonials', '/reviews',
     '/attorneys', '/team', '/our-team', '/contact', '/blog',
     '/faq', '/personal-injury', '/car-accidents',
+    '/personal-injury-blog', '/injury-blog', '/legal-blog', '/law-blog',
+    '/in-the-news', '/media', '/publications', '/updates',
   ];
   for (const path of fallbackPaths) {
     const fallbackUrl = base.origin + path;
@@ -354,6 +359,10 @@ interface PracticeAreaPage {
   page: ParsedPage;
 }
 
+// Broad regex patterns to catch state/city-prefixed practice area URLs
+const STATE_PREFIXED_PA_VEHICLE = /[a-z]+-(?:car|truck|motorcycle|bicycle|pedestrian|bus|uber|lyft|rideshare|boat|aviation|drunk-driving|distracted-driving|hit-and-run|company-vehicle|government-vehicle|uninsured)[_-]?(?:accident|crash|collision|injury)[_-]?(?:lawyer|attorney|law)/i;
+const STATE_PREFIXED_PA_GENERAL = /[a-z]+-(?:personal-injury|wrongful-death|medical-malpractice|birth-injury|brain-injury|spinal-cord|dog-bite|slip-and-fall|catastrophic-injury|nursing-home|premises-liability|workers-comp)[_-]?(?:lawyer|attorney|law)/i;
+
 function identifyPracticeAreaPages(pages: ParsedPage[]): PracticeAreaPage[] {
   const results: PracticeAreaPage[] = [];
   const seenAreas = new Set<string>();
@@ -363,6 +372,21 @@ function identifyPracticeAreaPages(pages: ParsedPage[]): PracticeAreaPage[] {
     const titleLower = page.title.toLowerCase();
     const h1Text = page.headings.filter(h => h.tag === 'h1').map(h => h.text.toLowerCase()).join(' ');
     const searchText = urlPath + ' ' + titleLower + ' ' + h1Text;
+
+    // Check state/city-prefixed URL patterns (e.g. /utah-car-accident-attorneys/)
+    if (STATE_PREFIXED_PA_VEHICLE.test(urlPath) || STATE_PREFIXED_PA_GENERAL.test(urlPath)) {
+      // Map to most relevant practice area
+      for (const pa of PRACTICE_AREA_KEYWORDS) {
+        if (seenAreas.has(pa.area)) continue;
+        for (const kw of pa.keywords) {
+          if (searchText.includes(kw)) {
+            results.push({ area: pa.area, page });
+            seenAreas.add(pa.area);
+            break;
+          }
+        }
+      }
+    }
 
     for (const pa of PRACTICE_AREA_KEYWORDS) {
       if (seenAreas.has(pa.area)) continue;
@@ -716,7 +740,7 @@ function checkBlogFreshness(pages: ParsedPage[]): CheckResult {
   const allText = pages.map(p => p.bodyText).join(' ');
 
   // Check for blog URLs
-  const hasBlogPage = pages.some(p => /\/blog|\/news|\/articles|\/insights/i.test(p.url));
+  const hasBlogPage = pages.some(p => /\/([a-z-]*(?:blog|news|article|insight|post|resource)s?)/i.test(p.url));
 
   // Check JSON-LD for datePublished
   const allJsonLd = pages.flatMap(p => p.jsonLd);
@@ -1219,7 +1243,7 @@ export async function scanWebsite(inputUrl: string): Promise<ScanResult> {
         const pageUrl = new URL(crawlPage.url);
         if (pageUrl.hostname.replace(/^www\./, '') !== domain) continue;
         const path = pageUrl.pathname.toLowerCase();
-        const isRelevant = /\/(about|team|attorney|lawyer|practice|result|verdict|review|testimonial|contact|case|people|blog|faq|service|injury|accident|location|office)/.test(path);
+        const isRelevant = /\/(about|team|attorney|lawyer|practice|result|verdict|review|testimonial|contact|case|people|[a-z-]*(?:blog|news|article|insight|post|resource)s?|faq|service|injury|accident|location|office|liability|negligence|malpractice|criminal|defense|family|divorce|custody|estate|bankruptcy|immigration|employment|discrimination)/.test(path);
         if (!isRelevant && allPages.length >= 15) continue;
         const parsed = parsePage(crawlPage.html, crawlPage.url, isSSL, domain);
         allPages.push(parsed);
