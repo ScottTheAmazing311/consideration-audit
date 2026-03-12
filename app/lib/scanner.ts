@@ -1243,7 +1243,9 @@ export async function scanWebsite(inputUrl: string): Promise<ScanResult> {
         const pageUrl = new URL(crawlPage.url);
         if (pageUrl.hostname.replace(/^www\./, '') !== domain) continue;
         const path = pageUrl.pathname.toLowerCase();
-        const isRelevant = /\/(about|team|attorney|lawyer|practice|result|verdict|review|testimonial|contact|case|people|[a-z-]*(?:blog|news|article|insight|post|resource)s?|faq|service|injury|accident|location|office|liability|negligence|malpractice|criminal|defense|family|divorce|custody|estate|bankruptcy|immigration|employment|discrimination)/.test(path);
+        // Match keywords anywhere in path (not just after /) to catch compound slugs
+        // like /personal-injury-blog/ or /utah-car-accident-attorneys/
+        const isRelevant = /(about|team|attorney|lawyer|practice|result|verdict|review|testimonial|contact|case|people|blog|news|article|insight|post|resource|faq|service|injury|accident|location|office|liability|negligence|malpractice|criminal|defense|family|divorce|custody|estate|bankruptcy|immigration|employment|discrimination)/.test(path);
         if (!isRelevant && allPages.length >= 15) continue;
         const parsed = parsePage(crawlPage.html, crawlPage.url, isSSL, domain);
         allPages.push(parsed);
