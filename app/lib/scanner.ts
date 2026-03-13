@@ -1188,71 +1188,75 @@ export async function scanWebsite(inputUrl: string): Promise<ScanResult> {
     fetchResource(url),
     fetchResource(origin + '/robots.txt', 5000),
     fetchResource(origin + '/sitemap.xml', 5000),
-    crawlSite({ url, limit: 75, maxDepth: 3, formats: ['html'] }).catch(() => null),
+    crawlSite({ url, limit: 75, maxDepth: 3, formats: ['html'], maxAge: 3600 }).catch(() => null),
     fetchPageSpeedScore(url).catch(() => ({ score: null, error: 'Failed' })),
   ]);
 
   const crawlResult: CrawlResult | null = crawlOutcome ?? null;
   let usedCrawl = false;
 
-  // Try standard homepage first; fall back to crawl HTML if fetch failed
-  let homepageContent = homepageRes.content;
-  if ((!homepageContent || homepageRes.status !== 200) && crawlResult) {
-    const crawlHome = crawlResult.pages.find(p => {
-      if (p.status !== 'completed' || !p.html) return false;
-      try { return new URL(p.url).pathname === '/' || new URL(p.url).pathname === ''; } catch { return false; }
-    });
-    if (crawlHome?.html) {
-      homepageContent = crawlHome.html;
-      usedCrawl = true;
-    }
-  }
+  // ── STEP 1: Build page collection, prioritizing crawl data ──
+  // Many law firm sites block server-side fetch (Cloudflare WAF), so
+  // the Cloudflare Browser Rendering crawl is often the ONLY data source.
+  const allPages: ParsedPage[] = [];
+  const seenUrls = new Set<string>();
 
-  if (!homepageContent) {
-    errors.push('Could not fetch homepage');
-  }
-
-  const homepage = homepageContent ? parsePage(homepageContent, url, isSSL, domain) : null;
-  const allPages: ParsedPage[] = homepage ? [homepage] : [];
-  const seenUrls = new Set<string>([url]);
-
-  // Fetch subpages via standard fetch (up to 10 for consideration audit)
-  if (homepage) {
-    const subUrls = discoverSubpages(homepage, url, domain).slice(0, 10);
-    const subResults = await Promise.allSettled(
-      subUrls.map(async (subUrl) => {
-        const res = await fetchResource(subUrl, 6000);
-        if (res.content && res.status === 200) return parsePage(res.content, subUrl, isSSL, domain);
-        return null;
-      })
-    );
-    for (const r of subResults) {
-      if (r.status === 'fulfilled' && r.value) {
-        allPages.push(r.value);
-        seenUrls.add(r.value.url);
-      }
-    }
-  }
-
-  // Merge additional crawl pages (JS-rendered content the basic fetch missed)
+  // Process ALL crawl pages first (they use real browser rendering)
   if (crawlResult) {
     for (const crawlPage of crawlResult.pages) {
       if (crawlPage.status !== 'completed' || !crawlPage.html) continue;
-      if (seenUrls.has(crawlPage.url)) continue;
       try {
         const pageUrl = new URL(crawlPage.url);
         if (pageUrl.hostname.replace(/^www\./, '') !== domain) continue;
-        const path = pageUrl.pathname.toLowerCase();
-        // Match keywords anywhere in path (not just after /) to catch compound slugs
-        // like /personal-injury-blog/ or /utah-car-accident-attorneys/
-        const isRelevant = /(about|team|attorney|lawyer|practice|result|verdict|review|testimonial|contact|case|people|blog|news|article|insight|post|resource|faq|service|injury|accident|location|office|liability|negligence|malpractice|criminal|defense|family|divorce|custody|estate|bankruptcy|immigration|employment|discrimination)/.test(path);
-        if (!isRelevant && allPages.length >= 15) continue;
+        const normalized = pageUrl.origin + pageUrl.pathname.replace(/\/$/, '');
+        if (seenUrls.has(normalized)) continue;
+        seenUrls.add(normalized);
+        seenUrls.add(crawlPage.url);
         const parsed = parsePage(crawlPage.html, crawlPage.url, isSSL, domain);
         allPages.push(parsed);
-        seenUrls.add(crawlPage.url);
         usedCrawl = true;
-        if (allPages.length >= 25) break; // Cap at 25 total pages (vs 15 in client-acquisition)
-      } catch { /* skip invalid URLs */ }
+      } catch {}
+    }
+  }
+
+  // Get homepage — prefer crawl version, fall back to direct fetch
+  let homepage = allPages.find(p => {
+    try { const path = new URL(p.url).pathname; return path === '/' || path === ''; } catch { return false; }
+  }) ?? null;
+
+  if (!homepage && homepageRes.content && homepageRes.status === 200) {
+    homepage = parsePage(homepageRes.content, url, isSSL, domain);
+    if (!seenUrls.has(url)) {
+      allPages.unshift(homepage);
+      seenUrls.add(url);
+    }
+  }
+
+  if (!homepage) errors.push('Could not fetch homepage');
+
+  // ── STEP 2: If crawl had few pages, supplement with direct fetches ──
+  if (homepage && allPages.length < 10) {
+    const subUrls = discoverSubpages(homepage, url, domain)
+      .filter(u => !seenUrls.has(u) && !seenUrls.has(u.replace(/\/$/, '')))
+      .slice(0, 10);
+    if (subUrls.length > 0) {
+      const subResults = await Promise.allSettled(
+        subUrls.map(async (subUrl) => {
+          const res = await fetchResource(subUrl, 6000);
+          if (res.content && res.status === 200) return parsePage(res.content, subUrl, isSSL, domain);
+          return null;
+        })
+      );
+      for (const r of subResults) {
+        if (r.status === 'fulfilled' && r.value) {
+          const normalized = new URL(r.value.url).origin + new URL(r.value.url).pathname.replace(/\/$/, '');
+          if (!seenUrls.has(normalized)) {
+            allPages.push(r.value);
+            seenUrls.add(normalized);
+            seenUrls.add(r.value.url);
+          }
+        }
+      }
     }
   }
 
