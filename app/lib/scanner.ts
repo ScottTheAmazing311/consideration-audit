@@ -1224,7 +1224,7 @@ export async function scanWebsite(inputUrl: string): Promise<ScanResult> {
     try { const path = new URL(p.url).pathname; return path === '/' || path === ''; } catch { return false; }
   }) ?? null;
 
-  if (!homepage && homepageRes.content && homepageRes.status === 200) {
+  if (!homepage && homepageRes.content) {
     homepage = parsePage(homepageRes.content, url, isSSL, domain);
     if (!seenUrls.has(url)) {
       allPages.unshift(homepage);
