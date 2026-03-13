@@ -1179,16 +1179,39 @@ export async function scanWebsite(inputUrl: string): Promise<ScanResult> {
 
   let url = inputUrl;
   if (!url.startsWith('http')) url = 'https://' + url;
-  const origin = new URL(url).origin;
-  const domain = new URL(url).hostname.replace(/^www\./, '');
-  const isSSL = url.startsWith('https');
 
+  let origin: string;
+  let domain: string;
+  let isSSL: boolean;
+  try {
+    const parsed = new URL(url);
+    origin = parsed.origin;
+    domain = parsed.hostname.replace(/^www\./, '');
+    isSSL = parsed.protocol === 'https:';
+  } catch {
+    // Return a minimal result for invalid URLs instead of throwing
+    return {
+      url: inputUrl, domain: inputUrl, firmName: inputUrl,
+      overallScore: 0, grade: 'D', gradeLabel: 'Invalid URL',
+      categories: {
+        onPageSEO: { name: 'On-Page SEO Quality', score: 0, maxPoints: 30, percentage: 0, grade: 'F', checks: [] },
+        contentDepth: { name: 'Content Depth & Authority', score: 0, maxPoints: 30, percentage: 0, grade: 'F', checks: [] },
+        localSEO: { name: 'Local SEO & Search Presence', score: 0, maxPoints: 20, percentage: 0, grade: 'F', checks: [] },
+        conversionConsideration: { name: 'Conversion at Consideration', score: 0, maxPoints: 20, percentage: 0, grade: 'F', checks: [] },
+      },
+      totalChecks: 0, passedChecks: 0, scanDurationMs: Date.now() - startTime,
+      headlineFindings: [], errors: ['Invalid URL format'],
+      crawlEnhanced: false, crawlPagesUsed: 0, practiceAreasFound: [],
+    };
+  }
+
+  try {
   // Parallel fetch: standard resources + Cloudflare crawl + PageSpeed API
   const [homepageRes, robotsRes, sitemapRes, crawlOutcome, pageSpeedResult] = await Promise.all([
     fetchResource(url),
     fetchResource(origin + '/robots.txt', 5000),
     fetchResource(origin + '/sitemap.xml', 5000),
-    crawlSite({ url, limit: 75, maxDepth: 3, formats: ['html'], maxAge: 3600 }).catch(() => null),
+    crawlSite({ url, limit: 30, maxDepth: 2, formats: ['html'], maxAge: 3600 }).catch(() => null),
     fetchPageSpeedScore(url).catch(() => ({ score: null, error: 'Failed' })),
   ]);
 
@@ -1343,4 +1366,22 @@ export async function scanWebsite(inputUrl: string): Promise<ScanResult> {
     crawlPagesUsed: allPages.length,
     practiceAreasFound: practiceAreas.map(pa => pa.area),
   };
+
+  } catch (err: any) {
+    // Return a partial result instead of throwing — prevents "unable to scan" errors
+    console.error('[consideration-audit] scanWebsite error:', err);
+    return {
+      url, domain, firmName: domain,
+      overallScore: 0, grade: 'D', gradeLabel: 'Scan Error',
+      categories: {
+        onPageSEO: { name: 'On-Page SEO Quality', score: 0, maxPoints: 30, percentage: 0, grade: 'F', checks: [] },
+        contentDepth: { name: 'Content Depth & Authority', score: 0, maxPoints: 30, percentage: 0, grade: 'F', checks: [] },
+        localSEO: { name: 'Local SEO & Search Presence', score: 0, maxPoints: 20, percentage: 0, grade: 'F', checks: [] },
+        conversionConsideration: { name: 'Conversion at Consideration', score: 0, maxPoints: 20, percentage: 0, grade: 'F', checks: [] },
+      },
+      totalChecks: 0, passedChecks: 0, scanDurationMs: Date.now() - startTime,
+      headlineFindings: [], errors: [err?.message || 'Unexpected scan error'],
+      crawlEnhanced: false, crawlPagesUsed: 0, practiceAreasFound: [],
+    };
+  }
 }

@@ -127,7 +127,7 @@ export default function Home() {
     } catch (err: any) {
       console.error('Scan error:', err);
       setCurrentView('input');
-      setError('Unable to scan this site. Please check the URL and try again.');
+      setError(err?.message || 'Unable to scan this site. Please check the URL and try again.');
     }
   };
 
