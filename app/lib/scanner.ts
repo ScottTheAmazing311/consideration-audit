@@ -1,5 +1,5 @@
 import * as cheerio from 'cheerio';
-import { crawlSite, type CrawlResult } from './cloudflare-crawl';
+import { crawlSite, renderPage, type CrawlResult } from './cloudflare-crawl';
 
 // ═══════════════════════════════════════════════════════════
 // TYPES
@@ -1212,8 +1212,8 @@ export async function scanWebsite(inputUrl: string): Promise<ScanResult> {
     fetchResource(origin + '/robots.txt', 5000),
     fetchResource(origin + '/sitemap.xml', 5000),
     Promise.race([
-      crawlSite({ url, limit: 20, maxDepth: 2, formats: ['html'], maxAge: 3600 }),
-      new Promise<null>(resolve => setTimeout(() => resolve(null), 60000)),
+      crawlSite({ url, limit: 50, maxDepth: 3, formats: ['html'], maxAge: 3600 }),
+      new Promise<null>(resolve => setTimeout(() => resolve(null), 40000)),
     ]).catch(() => null),
     fetchPageSpeedScore(url).catch(() => ({ score: null, error: 'Failed' })),
   ]);
@@ -1268,6 +1268,9 @@ export async function scanWebsite(inputUrl: string): Promise<ScanResult> {
     if (subUrls.length > 0) {
       const subResults = await Promise.allSettled(
         subUrls.map(async (subUrl) => {
+          const rendered = await renderPage(subUrl);
+          if (rendered.html) return parsePage(rendered.html, subUrl, isSSL, domain);
+          // fallback to raw fetch
           const res = await fetchResource(subUrl, 6000);
           if (res.content && res.status === 200) return parsePage(res.content, subUrl, isSSL, domain);
           return null;
